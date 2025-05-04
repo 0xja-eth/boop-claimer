@@ -25,23 +25,14 @@ import { buildTx } from "@/lib/solana/op/utils";
 import { MerkleDistributor } from "@/constants/contracts/idls/merkle_distributor";
 import { CPSwap } from "@/constants/contracts/idls/cp_swap";
 import { bundleTipIx, DefaultTipLamports, sendBundle, waitForBundle, waitForTransactions } from "@/lib/solana/jito";
-import { wait } from "@/lib/promise";
 import { toast } from 'sonner';
+import { ClaimingState } from "@/components/token-table";
 
 export const BundleTxCount = 4;
-
-export type ClaimStatus = 'unclaimed' | 'pending' | 'claiming' | 'claimed';
-
-export interface ClaimingState {
-  status: ClaimStatus;
-  distribution: Distribution;
-}
 
 export function useBatchClaim() {
   const [loading, setLoading] = useState(false);
   const [claimingStates, setClaimingStates] = useState<Record<string, ClaimingState>>({});
-
-  const { publicKey } = useWallet();
 
   const wallet = useAnchorWallet();
   const { connection } = useConnection();
@@ -63,7 +54,7 @@ export function useBatchClaim() {
 
       if (loading) return;
 
-      if (!wallet || !connection || !publicKey)
+      if (!wallet || !connection)
         throw new Error("Wallet not connected");
 
       if (!merkleDistributorProgram || !cpSwapProgram)
@@ -182,9 +173,10 @@ export function useBatchClaim() {
         setClaimingStates(prev => {
           const newStates = { ...prev };
           Object.keys(newStates).forEach(id => {
-            if (newStates[id].status !== 'claimed') {
-              newStates[id] = { ...newStates[id], status: 'unclaimed' };
-            }
+            if (newStates[id].status !== 'claimed') delete newStates[id]
+            // {
+            //   newStates[id] = { ...newStates[id], status: 'unclaimed' };
+            // }
           });
           return newStates;
         });
@@ -197,7 +189,6 @@ export function useBatchClaim() {
       loading,
       wallet,
       connection,
-      publicKey,
       merkleDistributorProgram,
       cpSwapProgram
     ],

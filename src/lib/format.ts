@@ -1,13 +1,13 @@
 const LAMPORTS_PER_SOL = 1000000000
 
-export function formatNumber(num: number | string, decimals: number = 2): string {
+export function formatNumber(num: number | string | bigint, decimals: number = 2): string {
   return new Intl.NumberFormat('en-US', {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
   }).format(Number(num))
 }
 
-export function lamportsToSol(lamports: string | number): number {
+export function lamportsToSol(lamports: string | number | bigint): number {
   return Number(lamports) / LAMPORTS_PER_SOL
 }
 

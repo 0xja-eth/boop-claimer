@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -10,13 +10,22 @@ import { formatNumber, formatUSD, formatSOL, lamportsToSol } from "@/lib/format"
 import Image from "next/image"
 import WalletBtn from "@/components/wallet-btn"
 import { Distribution } from "@/lib/solana/op/get-distributions"
-import { useBatchClaim, ClaimStatus } from "@/hooks/use-batch-claim";
+import { useBatchClaim } from "@/hooks/use-batch-claim";
+import BN from "bn.js";
+import { PublicKey } from "@solana/web3.js";
+import { useDistributionBalances } from "@/hooks/use-distribution-balances";
+import { useBatchSell } from "@/hooks/use-batch-sell";
+import { toast } from "sonner";
+
+export type ClaimStatus = 'unclaimed' | 'pending' | 'claiming' | 'claimed' | 'selling' | 'sold';
+
+export interface ClaimingState {
+  status: ClaimStatus;
+  distribution: Distribution;
+}
 
 export function TokenTable() {
-  const [jwtToken, setJwtToken] = useState(() => {
-    
-    return ""
-  })
+  const [jwtToken, setJwtToken] = useState("")
   const [minValue, setMinValue] = useState("1")
   const [showUnclaimed, setShowUnclaimed] = useState(false)
   const [selectedTokens, setSelectedTokens] = useState<string[]>([])
@@ -26,6 +35,9 @@ export function TokenTable() {
   const [autoSellAfterClaim, setAutoSellAfterClaim] = useState(true)
 
   const {claim, loading: claimLoading, claimingStates} = useBatchClaim()
+  const {sell, loading: sellLoading, sellingStates} = useBatchSell()
+
+  const states = { ...claimingStates, ...sellingStates }
 
   // Remove claimed tokens from selection
   useEffect(() => {
@@ -44,6 +56,8 @@ export function TokenTable() {
     }
   }, [])
 
+  const { balances, refetch } = useDistributionBalances(distributions)
+
   const handleFetchDistributions = async (jwtToken: string) => {
     // if (!jwtToken) return
     setIsLoading(true)
@@ -56,7 +70,10 @@ export function TokenTable() {
       })
       
       if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`)
+        localStorage.removeItem('jwtToken')
+        throw new Error("Invalid or expired JWT token. Please get a new token from boop.fun and try again.")
+
+        // throw new Error(`HTTP error! status: ${response.status}`)
       }
       
       const data = await response.json()
@@ -68,7 +85,8 @@ export function TokenTable() {
       setDistributions(data)
     } catch (error) {
       console.error("Failed to fetch distributions:", error)
-      setError(error instanceof Error ? error.message : "Failed to fetch distributions")
+      setError(error instanceof Error ? error.message : "Failed to fetch distributions. Please get a new token from boop.fun and try again.")
+      setJwtToken("")
     } finally {
       setIsLoading(false)
     }
@@ -95,9 +113,21 @@ export function TokenTable() {
     const claimingDistributions = distributions.filter(dist => selectedTokens.includes(dist.id))
 
     await claim(claimingDistributions, autoSellAfterClaim)
+    await refetch();
   }
-  const sellSelected = () => {
+  const sellSelected = async () => {
+    const sellingDistributions = distributions.filter(
+      d => selectedTokens.includes(d.id) && balances[d.id] > BigInt(0)
+    )
+    if (sellingDistributions.length <= 0) toast.message('No sellable tokens');
+    else {
+      setSelectedTokens(sellingDistributions.map(d => d.id))
 
+      const amounts = sellingDistributions.map(d => new BN(balances[d.id].toString()))
+
+      await sell(sellingDistributions, amounts)
+      await refetch();
+    }
   }
 
   const filteredDistributions = distributions
@@ -128,7 +158,7 @@ export function TokenTable() {
               onClick={() => handleFetchDistributions(jwtToken)}
               disabled={!jwtToken || isLoading}
             >
-              {isLoading ? "Loading..." : "Fetch Tokens"}
+              {isLoading ? "Loading..." : distributions.length > 0 ? "Refresh Rewards" : "Fetch Rewards"}
             </Button>
             <WalletBtn />
           </div>
@@ -209,7 +239,7 @@ export function TokenTable() {
                   </Label>
                 </div>
                 <div className="text-muted-foreground">
-                  --
+                  {balances[dist.id] ? formatNumber(lamportsToSol(balances[dist.id]), 6) : "--"}
                 </div>
                 <div>
                   {formatNumber(lamportsToSol(dist.amountLpt), 6)}
@@ -223,23 +253,24 @@ export function TokenTable() {
                 <div
                   className={cn(
                     "px-2 py-1 rounded-full text-sm inline-flex w-fit items-center gap-1",
-                    !dist.claimedAt && (!claimingStates[dist.id] || claimingStates[dist.id]?.status === 'unclaimed') && "bg-primary/20 text-primary",
-                    !dist.claimedAt && claimingStates[dist.id]?.status === 'pending' && "bg-yellow-500/20 text-yellow-500",
-                    !dist.claimedAt && claimingStates[dist.id]?.status === 'claiming' && "bg-blue-500/20 text-blue-500",
-                    (dist.claimedAt || claimingStates[dist.id]?.status === 'claimed') && "bg-green-500/20 text-green-500"
+                    !dist.claimedAt && (!states[dist.id] || states[dist.id]?.status === 'unclaimed') && "bg-primary/20 text-primary",
+                    states[dist.id]?.status === 'pending' && "bg-yellow-500/20 text-yellow-500",
+                    states[dist.id]?.status === 'claiming' || states[dist.id]?.status === 'selling' && "bg-blue-500/20 text-blue-500",
+                    (dist.claimedAt || states[dist.id]?.status === 'claimed' || states[dist.id]?.status === 'sold') && "bg-green-500/20 text-green-500"
                   )}
                 >
-                  {(claimingStates[dist.id]?.status === 'pending' || claimingStates[dist.id]?.status === 'claiming') && (
+                  {(states[dist.id]?.status === 'pending' || states[dist.id]?.status === 'claiming') && (
                     <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
                       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
                       <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
                     </svg>
                   )}
-                  {dist.claimedAt ? "Claimed" : 
-                    claimingStates[dist.id]?.status === 'pending' ? "Pending" :
-                    claimingStates[dist.id]?.status === 'claiming' ? "Claiming" :
-                    claimingStates[dist.id]?.status === 'claimed' ? "Claimed" :
-                    "Unclaimed"
+                  {states[dist.id]?.status === 'pending' ? "Pending" :
+                    states[dist.id]?.status === 'claiming' ? "Claiming" :
+                      dist.claimedAt || states[dist.id]?.status === 'claimed' ? "Claimed" :
+                        states[dist.id]?.status === 'selling' ? "Selling" :
+                          states[dist.id]?.status === 'sold' ? "Sold" :
+                            "Unclaimed"
                   }
                 </div>
               </div>
@@ -280,12 +311,14 @@ export function TokenTable() {
               {claimLoading ? "Claiming..." : `Claim Selected (${selectedTokens.length})`}
             </Button>
             <Button
-              disabled={true}
+              // disabled={true}
+              disabled={selectedTokens.length === 0 || sellLoading}
               variant="outline"
               className="flex-1 border-primary text-primary hover:bg-primary hover:text-primary-foreground"
               onClick={sellSelected}
             >
-              Sell Selected ({selectedTokens.length})
+              {sellLoading ? "Selling..." : `Sell Selected (${selectedTokens.length})`}
+              {/*Sell Selected ({selectedTokens.length})*/}
             </Button>
           </div>
         </div>
