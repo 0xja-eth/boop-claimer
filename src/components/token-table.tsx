@@ -40,7 +40,7 @@ export function TokenTable() {
     if (typeof window !== 'undefined') {
       const jwtToken = localStorage.getItem('jwtToken') || ""
       setJwtToken(jwtToken)
-      handleFetchDistributions(jwtToken)
+      if (jwtToken) handleFetchDistributions(jwtToken)
     }
   }, [])
 
