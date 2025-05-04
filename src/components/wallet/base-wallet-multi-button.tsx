@@ -105,7 +105,7 @@ export function BaseWalletMultiButton({ children, labels, ...props }: Props) {
         ref={ref}
         role="menu"
       >
-        {publicKey ? (
+        {/* {publicKey ? (
           <li
             className="h-12 cursor-pointer rounded text-center text-sm font-medium transition duration-100 hover:bg-background-100"
             role="menuitem"
@@ -119,7 +119,7 @@ export function BaseWalletMultiButton({ children, labels, ...props }: Props) {
           </li>
         ) : (
           <li></li>
-        )}
+        )} */}
         {onDisconnect ? (
           <li
             suppressHydrationWarning
