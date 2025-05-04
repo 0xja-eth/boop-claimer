@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import BN from "bn.js";
 import {
+  BlockhashWithExpiryBlockHeight,
   // Connection,
   LAMPORTS_PER_SOL,
   PublicKey,
-  Transaction,
+  Transaction, TransactionInstruction,
   // VersionedMessage,
-  VersionedTransaction,
+  VersionedTransaction
 } from "@solana/web3.js";
 import { loadProgram, signAndSendTx, signAndSendTxs, signTx, signTxs } from "@/lib/solana/solana";
 import {
@@ -23,15 +24,22 @@ import { sellIx } from "@/lib/solana/op/sell";
 import { buildTx } from "@/lib/solana/op/utils";
 import { MerkleDistributor } from "@/constants/contracts/idls/merkle_distributor";
 import { CPSwap } from "@/constants/contracts/idls/cp_swap";
-import { bundleTipIx, DefaultTipLamports, sendBundle } from "@/lib/solana/jito";
+import { bundleTipIx, DefaultTipLamports, sendBundle, waitForBundle, waitForTransactions } from "@/lib/solana/jito";
 import { wait } from "@/lib/promise";
+import { toast } from 'sonner';
 
 export const BundleTxCount = 4;
 
+export type ClaimStatus = 'unclaimed' | 'pending' | 'claiming' | 'claimed';
+
+export interface ClaimingState {
+  status: ClaimStatus;
+  distribution: Distribution;
+}
+
 export function useBatchClaim() {
   const [loading, setLoading] = useState(false);
-  const [claimingDistributions, setClaimingDistributions] = useState<Distribution[]>([]);
-  const [claimedIndex, setClaimedIndex] = useState(0);
+  const [claimingStates, setClaimingStates] = useState<Record<string, ClaimingState>>({});
 
   const { publicKey } = useWallet();
 
@@ -62,8 +70,13 @@ export function useBatchClaim() {
         throw new Error("Program not loaded");
 
       setLoading(true);
-      setClaimingDistributions(distributions);
-      setClaimedIndex(-1)
+      // Initialize all distributions as pending
+      setClaimingStates(
+        distributions.reduce((acc, dist) => ({
+          ...acc,
+          [dist.id]: { status: 'pending', distribution: dist }
+        }), {})
+      );
 
       try {
         let recentBlockhash = await connection.getLatestBlockhash()
@@ -73,6 +86,12 @@ export function useBatchClaim() {
         let bundleTxs: VersionedTransaction[] = []
 
         for (const distribution of distributions) {
+          // Update status to claiming
+          setClaimingStates(prev => ({
+            ...prev,
+            [distribution.id]: { ...prev[distribution.id], status: 'claiming' }
+          }));
+
           const mint = new PublicKey(distribution.token.address)
           const amount = new BN(distribution.amountLpt)
           const proofs = distribution.proofs
@@ -101,47 +120,75 @@ export function useBatchClaim() {
           distributionTxs.push(newTxs)
 
           if (bundleTxs.length >= BundleTxCount) {
-            // await signAndSendTxs(connection, bundleTxs, wallet)
+            await sendBundleTxs(recentBlockhash, distributions, distributionTxs, bundleTxs, sell);
 
-            const tipTx = await buildTx(
-              bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
-              { recentBlockhash, payer: wallet.publicKey, units: 30000 }
-            )
-            await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false)
-              // .then(() =>
-              //   setClaimedIndex(prev => prev + (sell ? bundleTxs.length / 2 : bundleTxs.length))
-              // )
-              // .catch(error => {
-              //   console.error("Failed to send bundle:", error);
-              // })
-
-            await wait(5000)
+            // const tipTx = await buildTx(
+            //   bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
+            //   { recentBlockhash, payer: wallet.publicKey, units: 30000 }
+            // )
+            //
+            // await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false);
+            // // Update status to claimed for the processed distributions
+            // const processedDistIds = distributionTxs
+            //   .slice(-Math.floor(bundleTxs.length / (sell ? 2 : 1)))
+            //   .map(txs => distributions[distributionTxs.indexOf(txs)].id);
+            //
+            // setClaimingStates(prev => {
+            //   const newStates = { ...prev };
+            //   processedDistIds.forEach(id => {
+            //     if (newStates[id]) {
+            //       newStates[id] = { ...newStates[id], status: 'claimed' };
+            //       toast.success(`Successfully claimed ${newStates[id].distribution.token.symbol}`);
+            //     }
+            //   });
+            //   return newStates;
+            // });
 
             recentBlockhash = await connection.getLatestBlockhash()
             bundleTxs = []
           }
         }
         if (bundleTxs.length > 0) {
-          // await signAndSendTxs(connection, bundleTxs, wallet)
+          await sendBundleTxs(recentBlockhash, distributions, distributionTxs, bundleTxs, sell);
 
-          const tipTx = await buildTx(
-            bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
-            { recentBlockhash, payer: wallet.publicKey, units: 30000 }
-          )
-          await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false)
-          // sendBundle(connection, wallet, [tipTx, ...bundleTxs])
-          //   .then(() =>
-          //     setClaimedIndex(prev => prev + (sell ? bundleTxs.length / 2 : bundleTxs.length))
-          //   )
-          //   .catch(error => {
-          //     console.error("Failed to send bundle:", error);
-          //   })
+          // const tipTx = await buildTx(
+          //   bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
+          //   { recentBlockhash, payer: wallet.publicKey, units: 30000 }
+          // )
+          //
+          // await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false);
+          // // Update status to claimed for the remaining distributions
+          // const remainingDistIds = distributionTxs
+          //   .slice(-Math.floor(bundleTxs.length / (sell ? 2 : 1)))
+          //   .map(txs => distributions[distributionTxs.indexOf(txs)].id);
+          //
+          // setClaimingStates(prev => {
+          //   const newStates = { ...prev };
+          //   remainingDistIds.forEach(id => {
+          //     if (newStates[id]) {
+          //       newStates[id] = { ...newStates[id], status: 'claimed' };
+          //       toast.success(`Successfully claimed ${newStates[id].distribution.token.symbol}`);
+          //     }
+          //   });
+          //   return newStates;
+          // });
         }
 
         console.log("Claiming transactions:", distributionTxs);
       } catch (error) {
         console.error("Failed to claim:", error);
-        throw error; // TODO: Handle error
+        toast.error('Failed to process claims');
+        // Reset status for non-claimed distributions
+        setClaimingStates(prev => {
+          const newStates = { ...prev };
+          Object.keys(newStates).forEach(id => {
+            if (newStates[id].status !== 'claimed') {
+              newStates[id] = { ...newStates[id], status: 'unclaimed' };
+            }
+          });
+          return newStates;
+        });
+        throw error;
       } finally {
         setLoading(false);
       }
@@ -156,5 +203,50 @@ export function useBatchClaim() {
     ],
   );
 
-  return { claim, claimingDistributions, claimedIndex, loading };
+  const sendBundleTxs = useCallback(
+    async (recentBlockhash: BlockhashWithExpiryBlockHeight,
+           distributions: Distribution[],
+           distributionTxs: VersionedTransaction[][],
+           bundleTxs: VersionedTransaction[],
+           sell: boolean) => {
+
+    if (!wallet || !connection)
+      throw new Error("Wallet not connected");
+
+    try {
+      const tipTx = await buildTx(
+        bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
+        { recentBlockhash, payer: wallet.publicKey, units: 30000 }
+      )
+
+      const {transactions} = await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false);
+
+      // Update status to claimed for the remaining distributions
+      const remainingDistIds = distributionTxs
+        .slice(-Math.floor(bundleTxs.length / (sell ? 2 : 1)))
+        .map(txs => distributions[distributionTxs.indexOf(txs)].id);
+
+      waitForTransactions(connection, transactions)
+        .then(() => {
+          setClaimingStates(prev => {
+            const newStates = { ...prev };
+            remainingDistIds.forEach(id => {
+              if (newStates[id]) {
+                newStates[id] = { ...newStates[id], status: 'claimed' };
+                toast.success(`Successfully claimed ${newStates[id].distribution.token.symbol}`);
+              }
+            });
+            return newStates;
+          });
+        })
+        .catch(e => console.error("Failed to wait for bundle:", e));
+      } catch (error) {
+        console.error("Failed to send bundle:", error);
+        toast.error('Failed to send transactions');
+
+        throw error
+      }
+    }, [connection, wallet])
+
+    return { claim, claimingStates, loading };
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -10,22 +10,42 @@ import { formatNumber, formatUSD, formatSOL, lamportsToSol } from "@/lib/format"
 import Image from "next/image"
 import WalletBtn from "@/components/wallet-btn"
 import { Distribution } from "@/lib/solana/op/get-distributions"
-import { useBatchClaim } from "@/hooks/use-batch-claim";
+import { useBatchClaim, ClaimStatus } from "@/hooks/use-batch-claim";
 
 export function TokenTable() {
-  const [jwtToken, setJwtToken] = useState("")
+  const [jwtToken, setJwtToken] = useState(() => {
+    
+    return ""
+  })
   const [minValue, setMinValue] = useState("1")
   const [showUnclaimed, setShowUnclaimed] = useState(false)
   const [selectedTokens, setSelectedTokens] = useState<string[]>([])
   const [distributions, setDistributions] = useState<Distribution[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [autoSellAfterClaim, setAutoSellAfterClaim] = useState(false)
+  const [autoSellAfterClaim, setAutoSellAfterClaim] = useState(true)
 
-  const {claim, loading, claimingDistributions, claimedIndex} = useBatchClaim()
+  const {claim, loading: claimLoading, claimingStates} = useBatchClaim()
 
-  const handleFetchDistributions = async () => {
-    if (!jwtToken) return
+  // Remove claimed tokens from selection
+  useEffect(() => {
+    setSelectedTokens(prev => 
+      prev.filter(id => 
+        !claimingStates[id] || claimingStates[id]?.status !== 'claimed'
+      )
+    )
+  }, [claimingStates])
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const jwtToken = localStorage.getItem('jwtToken') || ""
+      setJwtToken(jwtToken)
+      handleFetchDistributions(jwtToken)
+    }
+  }, [])
+
+  const handleFetchDistributions = async (jwtToken: string) => {
+    // if (!jwtToken) return
     setIsLoading(true)
     setError(null)
     try {
@@ -44,6 +64,7 @@ export function TokenTable() {
         throw new Error(data.error)
       }
       
+      localStorage.setItem('jwtToken', jwtToken)
       setDistributions(data)
     } catch (error) {
       console.error("Failed to fetch distributions:", error)
@@ -104,7 +125,7 @@ export function TokenTable() {
             />
             <Button 
               variant="outline" 
-              onClick={handleFetchDistributions}
+              onClick={() => handleFetchDistributions(jwtToken)}
               disabled={!jwtToken || isLoading}
             >
               {isLoading ? "Loading..." : "Fetch Tokens"}
@@ -201,12 +222,25 @@ export function TokenTable() {
                 </div>
                 <div
                   className={cn(
-                    "px-2 py-1 rounded-full text-sm inline-flex w-fit",
-                    !dist.claimedAt && "bg-primary/20 text-primary",
-                    dist.claimedAt && "bg-green-500/20 text-green-500"
+                    "px-2 py-1 rounded-full text-sm inline-flex w-fit items-center gap-1",
+                    !dist.claimedAt && (!claimingStates[dist.id] || claimingStates[dist.id]?.status === 'unclaimed') && "bg-primary/20 text-primary",
+                    !dist.claimedAt && claimingStates[dist.id]?.status === 'pending' && "bg-yellow-500/20 text-yellow-500",
+                    !dist.claimedAt && claimingStates[dist.id]?.status === 'claiming' && "bg-blue-500/20 text-blue-500",
+                    (dist.claimedAt || claimingStates[dist.id]?.status === 'claimed') && "bg-green-500/20 text-green-500"
                   )}
                 >
-                  {dist.claimedAt ? "Claimed" : "Unclaimed"}
+                  {(claimingStates[dist.id]?.status === 'pending' || claimingStates[dist.id]?.status === 'claiming') && (
+                    <svg className="animate-spin h-3 w-3" viewBox="0 0 24 24">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                    </svg>
+                  )}
+                  {dist.claimedAt ? "Claimed" : 
+                    claimingStates[dist.id]?.status === 'pending' ? "Pending" :
+                    claimingStates[dist.id]?.status === 'claiming' ? "Claiming" :
+                    claimingStates[dist.id]?.status === 'claimed' ? "Claimed" :
+                    "Unclaimed"
+                  }
                 </div>
               </div>
             ))}
@@ -238,15 +272,15 @@ export function TokenTable() {
               </Label>
             </div>
             <Button
-              disabled={selectedTokens.length === 0}
+              disabled={selectedTokens.length === 0 || claimLoading}
               variant="default"
               className="flex-1 bg-primary text-primary-foreground"
               onClick={claimSelected}
             >
-              Claim Selected ({selectedTokens.length})
+              {claimLoading ? "Claiming..." : `Claim Selected (${selectedTokens.length})`}
             </Button>
             <Button
-              disabled={selectedTokens.length === 0}
+              disabled={true}
               variant="outline"
               className="flex-1 border-primary text-primary hover:bg-primary hover:text-primary-foreground"
               onClick={sellSelected}

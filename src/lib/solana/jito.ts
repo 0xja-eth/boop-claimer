@@ -89,9 +89,12 @@ export async function sendBundle(
   wallet: AnchorWallet,
   txs: (VersionedTransaction | string)[],
   otherSigners: Keypair[] = [],
-  waitForConfirmation = true,
+  isWaitForBundle = true,
   tipLamports = 0, tipAccountIdx?: number
-) {
+): Promise<{
+  bundle_id: string | null,
+  transactions: string[]
+}> {
   console.log(`[Send Bundle] Sending ${txs.length} transactions`, txs)
 
   if (txs.length === 0) return {
@@ -149,11 +152,56 @@ export async function sendBundle(
   console.log("[Send Bundle] Sending bundle", serializedTxs)
 
   const bundleId = await SendBundle([serializedTxs])
-  console.log("[Send Bundle] Bundle ID", bundleId)
 
-  if (!waitForConfirmation)
-    return { bundle_id: bundleId, transactions: serializedTxs }
+  const txHashes = serializedTxs.map(stx => bs58.encode(
+    VersionedTransaction.deserialize(bs58.decode(stx)).signatures[0]
+  ))
 
+  console.log("[Send Bundle] Bundle ID", bundleId, txHashes)
+
+  if (!isWaitForBundle)
+    return {
+      bundle_id: bundleId,
+      transactions: txHashes
+    }
+
+  return waitForBundle(bundleId)
+
+  // const waitRes = await waitFor(async () => {
+  //   const statuses = await GetInflightBundleStatuses([[bundleId]]);
+  //   const status = statuses.value[0]?.status
+  //
+  //   console.log("[Send Bundle] Checking bundle", status)
+  //   switch (status) {
+  //     case "Failed": return { isLanded: false }
+  //     case "Landed": return { isLanded: true }
+  //   }
+  // }, 2000, 15) // wait for 30 seconds
+  // const isLanded = waitRes?.isLanded
+  //
+  // if (!isLanded) {
+  //   console.log("[Send Bundle] Bundle failed to land")
+  //   throw new BundleNotLandedError(bundleId)
+  // }
+  //
+  // const statuses = await waitFor(async () => {
+  //   const res = await GetBundleStatuses([[bundleId]]);
+  //   const status = res.value[0]?.confirmation_status
+  //   const err = res.value[0]?.err
+  //
+  //   console.log("[Send Bundle] Checking bundle", status, err)
+  //   return status === "confirmed" ? res : null
+  // }, 2000, 5) // wait for 10 seconds
+  //
+  // if (!statuses) {
+  //   console.log("[Send Bundle] Bundle failed to confirm")
+  //   throw new Error("Bundle not confirmed")
+  // }
+  //
+  // console.log("[Send Bundle] Bundle confirmed", statuses)
+}
+
+export async function waitForBundle(bundleId: string, waitingLevel: "Pending" | "Landed" = "Landed") {
   const waitRes = await waitFor(async () => {
     const statuses = await GetInflightBundleStatuses([[bundleId]]);
     const status = statuses.value[0]?.status
@@ -161,9 +209,9 @@ export async function sendBundle(
     console.log("[Send Bundle] Checking bundle", status)
     switch (status) {
       case "Failed": return { isLanded: false }
-      case "Landed": return { isLanded: true }
+      case waitingLevel: return { isLanded: true }
     }
-  }, 2000, 15) // wait for 30 seconds
+  }, 2000, 20) // wait for 40 seconds
   const isLanded = waitRes?.isLanded
 
   if (!isLanded) {
@@ -178,7 +226,7 @@ export async function sendBundle(
 
     console.log("[Send Bundle] Checking bundle", status, err)
     return status === "confirmed" ? res : null
-  }, 2000, 5) // wait for 10 seconds
+  }, 2000, 10) // wait for 20 seconds
 
   if (!statuses) {
     console.log("[Send Bundle] Bundle failed to confirm")
@@ -188,6 +236,10 @@ export async function sendBundle(
   console.log("[Send Bundle] Bundle confirmed", statuses)
 
   return statuses.value[0]
+}
+
+export async function waitForTransactions(connection: Connection, transactions: string[]) {
+  return waitForSignatureConfirmation(connection, transactions[0])
 }
 
 export async function sendTx(
