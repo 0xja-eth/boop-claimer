@@ -105,36 +105,23 @@ export function BaseWalletMultiButton({ children, labels, ...props }: Props) {
         ref={ref}
         role="menu"
       >
-        {/* {publicKey ? (
-          <li
-            className="h-12 cursor-pointer rounded text-center text-sm font-medium transition duration-100 hover:bg-background-100"
-            role="menuitem"
-          >
-            <Link
-              className="inline-flex h-full w-full items-center justify-center"
-              href={`/profile/${publicKey}`}
-            >
-              View Profile
-            </Link>
-          </li>
+        {onDisconnect && <li
+          suppressHydrationWarning
+          className="inline-flex h-12 cursor-pointer items-center justify-center rounded text-center text-sm font-medium transition duration-100 hover:bg-background-100"
+          onClick={() => {
+            onDisconnect?.();
+            setMenuOpen(false);
+          }}
+          role="menuitem"
+        >
+          {labels["disconnect"]}
+        </li>}
+        {/* <li></li>
+        {onDisconnect ? (
+          
         ) : (
           <li></li>
         )} */}
-        {onDisconnect ? (
-          <li
-            suppressHydrationWarning
-            className="inline-flex h-12 cursor-pointer items-center justify-center rounded text-center text-sm font-medium transition duration-100 hover:bg-background-100"
-            onClick={() => {
-              onDisconnect();
-              setMenuOpen(false);
-            }}
-            role="menuitem"
-          >
-            {labels["disconnect"]}
-          </li>
-        ) : (
-          <li></li>
-        )}
       </ul>
     </div>
   );
