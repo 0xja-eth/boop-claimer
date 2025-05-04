@@ -3,7 +3,7 @@ import jwt from 'jsonwebtoken';
 
 const BOOP_API = 'https://graphql-mainnet.boop.works/graphql';
 
-interface JWTPayload {
+export interface JWTPayload {
   wallet_address: string;
   wallet_id: number;
   company: string;
@@ -11,7 +11,7 @@ interface JWTPayload {
   iat: number;
 }
 
-interface TokenInfo {
+export interface TokenInfo {
   name: string;
   address: string;
   symbol: string;
@@ -19,7 +19,7 @@ interface TokenInfo {
   imageFlag: string;
 }
 
-interface Distribution {
+export interface Distribution {
   id: string;
   amountLpt: string;
   amountUsd: string;

@@ -1,6 +1,6 @@
 "use client";
 
-import { LABELS } from "@/lib/constants";
+import { LABELS } from "@/constants";
 import { BaseWalletMultiButton } from "@/components/wallet/base-wallet-multi-button";
 
 export default function WalletBtn() {

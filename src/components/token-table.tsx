@@ -9,25 +9,8 @@ import { cn } from "@/lib/utils"
 import { formatNumber, formatUSD, formatSOL, lamportsToSol } from "@/lib/format"
 import Image from "next/image"
 import WalletBtn from "@/components/wallet-btn"
-
-interface TokenInfo {
-  name: string
-  address: string
-  symbol: string
-  logoUrl: string
-  imageFlag: string
-}
-
-interface Distribution {
-  id: string
-  amountLpt: string
-  amountUsd: string
-  amountSolLpt: string
-  proofs: number[][]
-  claimedAt: string | null
-  txHash: string | null
-  token: TokenInfo
-}
+import { Distribution } from "@/lib/solana/op/get-distributions"
+import { useBatchClaim } from "@/hooks/use-batch-claim";
 
 export function TokenTable() {
   const [jwtToken, setJwtToken] = useState("")
@@ -37,6 +20,9 @@ export function TokenTable() {
   const [distributions, setDistributions] = useState<Distribution[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [autoSellAfterClaim, setAutoSellAfterClaim] = useState(false)
+
+  const {claim, loading, claimingDistributions, claimedIndex} = useBatchClaim()
 
   const handleFetchDistributions = async () => {
     if (!jwtToken) return
@@ -84,8 +70,10 @@ export function TokenTable() {
     }
   }
 
-  const claimSelected = () => {
+  const claimSelected = async () => {
+    const claimingDistributions = distributions.filter(dist => selectedTokens.includes(dist.id))
 
+    await claim(claimingDistributions, autoSellAfterClaim)
   }
   const sellSelected = () => {
 
@@ -237,6 +225,18 @@ export function TokenTable() {
           </div>
           
           <div className="flex gap-4">
+            <div className="flex items-center gap-2">
+              <input
+                type="checkbox"
+                id="autoSellAfterClaim"
+                checked={autoSellAfterClaim}
+                onChange={(e) => setAutoSellAfterClaim(e.target.checked)}
+                className="rounded border-primary text-primary focus:ring-primary"
+              />
+              <Label htmlFor="autoSellAfterClaim" className="text-sm cursor-pointer">
+                Auto-sell after claim
+              </Label>
+            </div>
             <Button
               disabled={selectedTokens.length === 0}
               variant="default"

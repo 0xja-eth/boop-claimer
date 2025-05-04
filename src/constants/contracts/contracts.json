@@ -1,0 +1,10 @@
+{
+  "mainnet-beta": {
+    "boop": "boop8hVGQGqehUK2iVEMEnMrL5RbjywRzHKBmBE7ry4",
+    "boop_admin": "J7cV46t2BLkoHWvmrcG1nK3wgB2D1EmHLko29bEDbnpV",
+    "merkle_distributor": "boopEtkTLx8x8moK7mMBQZUfzaEiA96Qn7gQeNdcQMg",
+    "cp_swap": "CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C",
+    "amm_config": "G95xxie3XbkCqtE39GgQ9Ggc7xBC8Uceve7HFDEFApkc"
+  }
+}
+

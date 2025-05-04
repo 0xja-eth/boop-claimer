@@ -1,0 +1,89 @@
+{
+  "version": "0.1.0",
+  "name": "boop",
+  "instructions": [
+    {
+      "name": "buyToken",
+      "accounts": [
+        {
+          "name": "mint",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "bonding_curve",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "trading_fees_vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "bonding_curve_vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "bonding_curve_sol_vault",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "recipient_token_account",
+          "isMut": true,
+          "isSigner": false
+        },
+        {
+          "name": "buyer",
+          "isMut": true,
+          "isSigner": true
+        },
+        {
+          "name": "config",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "vault_authority",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "wsol",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "system_program",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "token_program",
+          "isMut": false,
+          "isSigner": false
+        },
+        {
+          "name": "associated_token_program",
+          "isMut": false,
+          "isSigner": false
+        }
+      ],
+      "args": [
+        {
+          "name": "buyAmount",
+          "type": "u64"
+        },
+        {
+          "name": "amountOutMin",
+          "type": "u64"
+        }
+      ]
+    }
+  ],
+  "metadata": {
+    "address": "boop8hVGQGqehUK2iVEMEnMrL5RbjywRzHKBmBE7ry4"
+  }
+}

@@ -1,0 +1,36 @@
+export const CPSwap = {
+  "version": "0.1.0",
+  "name": "cp_swap",
+  "instructions": [
+    {
+      "name": "swapBaseInput",
+      "accounts": [
+        { "name": "payer", "isMut": false, "isSigner": true },
+        {
+          "name": "authority",
+          "isMut": false,
+          "isSigner": false,
+          "pda": {
+            "seeds": [["const", "AUTH_SEED"]],
+            "programId": "program_id"
+          }
+        },
+        { "name": "ammConfig", "isMut": false, "isSigner": false },
+        { "name": "poolState", "isMut": true, "isSigner": false },
+        { "name": "inputTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "outputTokenAccount", "isMut": true, "isSigner": false },
+        { "name": "inputVault", "isMut": true, "isSigner": false },
+        { "name": "outputVault", "isMut": true, "isSigner": false },
+        { "name": "inputTokenProgram", "isMut": false, "isSigner": false },
+        { "name": "outputTokenProgram", "isMut": false, "isSigner": false },
+        { "name": "inputTokenMint", "isMut": false, "isSigner": false },
+        { "name": "outputTokenMint", "isMut": false, "isSigner": false },
+        { "name": "observationState", "isMut": true, "isSigner": false }
+      ],
+      "args": [
+        { "name": "amountIn", "type": "u64" },
+        { "name": "minimumAmountOut", "type": "u64" }
+      ]
+    }
+  ]
+} as const
