@@ -22,6 +22,3 @@ BoopClaimer is a web tool that helps users batch claim and sell Boop staking rew
    - Connect your wallet on the BoopClaimer website.
    - Note: The wallet you connect must be the same wallet address you used on boop.fun.
 
----
-
-If you have any questions, feel free to provide feedback or contact the developer.
