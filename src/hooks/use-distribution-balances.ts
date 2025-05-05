@@ -1,58 +1,58 @@
 import { useCallback, useEffect, useState } from "react";
-import BN from "bn.js";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, Connection } from "@solana/web3.js";
+import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token";
 import { Distribution } from "@/lib/solana/op/get-distributions";
 import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
-import { getAccount, getAssociatedTokenAddressSync, getMultipleAccounts } from "@solana/spl-token";
-import { wait } from "@/lib/promise";
 
 export function useDistributionBalances(distributions: Distribution[]) {
-  const [balances, setBalances] = useState<Record<string, bigint>>({})
+  const [balances, setBalances] = useState<Record<string, bigint>>({});
 
   const wallet = useAnchorWallet();
   const { connection } = useConnection();
 
-  // const fetchAccountInfos = useCallback(async (mints: PublicKey[]) => {
-  //   if (!wallet || !connection)
-  //     throw new Error("Wallet not connected");
-  //
-  //   const tokenAccounts = mints.map(mint => getAssociatedTokenAddressSync(mint, wallet.publicKey))
-  //   const res = await getMultipleAccounts(connection, tokenAccounts)
-  //
-  //   console.log("tokenAccountInfos", res)
-  //
-  //   return res
-  // }, [connection])
+  const refetch = useCallback(async () => {
+    if (!wallet || !connection) return;
 
-  const fetchAccountInfo = useCallback(async (mint: PublicKey) => {
-    if (!wallet || !connection)
-      throw new Error("Wallet not connected");
+    try {
+      const mintPubkeys = distributions.map(d => new PublicKey(d.token.address));
+      const ataPubkeys = mintPubkeys.map(mint =>
+        getAssociatedTokenAddressSync(mint, wallet.publicKey)
+      );
 
-    const tokenAccount = getAssociatedTokenAddressSync(mint, wallet.publicKey)
-    return await getAccount(connection, tokenAccount)
-  }, [wallet, connection])
+      const accountInfos = await connection.getMultipleAccountsInfo(ataPubkeys);
 
-  const refetch = async () => {
-    distributions.map(async (d, i) => {
-      await wait(250 * i);
+      const result: Record<string, bigint> = {};
 
-      try {
-        const mint = new PublicKey(d.token.address)
-        const accountInfo = await fetchAccountInfo(mint)
+      accountInfos.forEach((accInfo, idx) => {
+        const distId = distributions[idx].id;
 
-        setBalances((prev) => ({
-          ...prev, [d.id]: accountInfo.amount
-        }))
-      } catch (e) {
-        console.error("Fetch balance failed:", e)
-        setBalances((prev) => ({
-          ...prev, [d.id]: BigInt(0)
-        }))
-      }
-    })
-  }
+        if (!accInfo) {
+          result[distId] = BigInt(0);
+          return;
+        }
 
-  useEffect(() => { refetch() }, [connection, wallet, distributions]);
+        try {
+          const tokenAccount = unpackAccount(accInfo.owner, accInfo);
+          result[distId] = tokenAccount.amount;
+        } catch (e) {
+          console.warn(`Failed to unpack token account for mint ${mintPubkeys[idx].toBase58()}:`, e);
+          result[distId] = BigInt(0); // 不是合法 SPL Token Account，视为 0
+        }
+      });
 
-  return { balances, refetch }
+      setBalances(result);
+    } catch (err) {
+      console.error("Error fetching distribution balances:", err);
+
+      const fallback: Record<string, bigint> = {};
+      distributions.forEach(d => (fallback[d.id] = BigInt(0)));
+      setBalances(fallback);
+    }
+  }, [wallet, connection, distributions]);
+
+  useEffect(() => {
+    refetch();
+  }, [refetch]);
+
+  return { balances, refetch };
 }

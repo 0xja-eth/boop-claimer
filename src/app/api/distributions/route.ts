@@ -13,8 +13,11 @@ export async function GET(request: NextRequest) {
 
   const token = authHeader.split(' ')[1]
   
+  // 获取 includeClaimed 查询参数
+  const includeClaimed = request.nextUrl.searchParams.get('includeClaimed') === 'true'
+  
   try {
-    const distributions = await getDistributions(token)
+    const distributions = await getDistributions(token, includeClaimed)
 
     return NextResponse.json(distributions)
   } catch (error) {

@@ -52,10 +52,22 @@ function getWalletAddressFromToken(token: string): string {
   }
 }
 
-const query = `
-query GetAccountDistributions($address: String!, $orderBy: StakingAirdropClaimSort, $status: StakingAirdropClaimStatus) {
+export async function getDistributions(jwtToken: string, includeClaimed = false) {
+  try {
+    const walletAddress = getWalletAddressFromToken(jwtToken);
+    
+    const variables = {
+      address: walletAddress, // || Provider.publicKey.toString(),
+      orderBy: 'AMOUNT_DESC',
+      // status: 'PENDING'
+    } as any;
+
+    if (!includeClaimed) variables.status = 'PENDING';
+
+    const query = `
+query GetAccountDistributions($address: String!, $orderBy: StakingAirdropClaimSort${!includeClaimed ? ", $status: StakingAirdropClaimStatus" : ""}) {
   account(address: $address) {
-    stakingAirdrops(orderBy: $orderBy, status: $status) {
+    stakingAirdrops(orderBy: $orderBy${!includeClaimed ? ", status: $status" : ""}) {
       nodes {
         ...AccountAirdrop
       }
@@ -80,16 +92,6 @@ fragment AccountAirdrop on AccountStakingAirdrop {
   }
 }
 `;
-
-export async function getDistributions(jwtToken: string) {
-  try {
-    const walletAddress = getWalletAddressFromToken(jwtToken);
-    
-    const variables = {
-      address: walletAddress, // || Provider.publicKey.toString(),
-      orderBy: 'AMOUNT_DESC',
-      status: 'PENDING'
-    };
 
     const response = await axios.post<DistributionResponse>(
       BOOP_API,

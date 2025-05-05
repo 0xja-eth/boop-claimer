@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { cn } from "@/lib/utils"
 import { formatNumber, formatUSD, formatSOL, lamportsToSol } from "@/lib/format"
 import Image from "next/image"
@@ -17,6 +18,7 @@ import { useDistributionBalances } from "@/hooks/use-distribution-balances";
 import { useBatchSell } from "@/hooks/use-batch-sell";
 import { toast } from "sonner";
 import { HowToPlayButton } from "@/components/how-to-play-modal";
+import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
 
 export type ClaimStatus = 'unclaimed' | 'pending' | 'claiming' | 'claimed' | 'selling' | 'sold';
 
@@ -34,9 +36,15 @@ export function TokenTable() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [autoSellAfterClaim, setAutoSellAfterClaim] = useState(true)
+  const [includeClaimed, setIncludeClaimed] = useState(false)
+  const [showOnlyWithBalance, setShowOnlyWithBalance] = useState(false)
+  const [minSolValue, setMinSolValue] = useState<string>("0")
 
   const {claim, loading: claimLoading, claimingStates} = useBatchClaim()
   const {sell, loading: sellLoading, sellingStates} = useBatchSell()
+
+  const wallet = useAnchorWallet();
+  const { connection } = useConnection();
 
   const states = { ...claimingStates, ...sellingStates }
 
@@ -53,18 +61,18 @@ export function TokenTable() {
     if (typeof window !== 'undefined') {
       const jwtToken = localStorage.getItem('jwtToken') || ""
       setJwtToken(jwtToken)
-      if (jwtToken) handleFetchDistributions(jwtToken)
+      if (jwtToken) handleFetchDistributions(jwtToken, includeClaimed)
     }
   }, [])
 
   const { balances, refetch } = useDistributionBalances(distributions)
 
-  const handleFetchDistributions = async (jwtToken: string) => {
+  const handleFetchDistributions = async (jwtToken: string, includeClaimed: boolean) => {
     // if (!jwtToken) return
     setIsLoading(true)
     setError(null)
     try {
-      const response = await fetch("/api/distributions", {
+      const response = await fetch(`/api/distributions?includeClaimed=${includeClaimed}`, {
         headers: {
           "Authorization": `Bearer ${jwtToken}`
         }
@@ -131,7 +139,17 @@ export function TokenTable() {
     }
   }
 
-  const filteredDistributions = distributions
+  const filteredDistributions = distributions.filter(dist => {
+    // 检查是否满足最小 SOL 价值要求
+    const solValue = lamportsToSol(dist.amountSolLpt);
+    const meetsMinSolValue = solValue >= parseFloat(minSolValue || "0");
+    
+    // 检查是否满足只显示有余额的要求
+    const hasBalance = !showOnlyWithBalance || (balances[dist.id] && balances[dist.id] > BigInt(0.1 * 1e9));
+    
+    return meetsMinSolValue && hasBalance;
+  });
+
   const selectedTotal = {
     usd: filteredDistributions
       .filter(dist => selectedTokens.includes(dist.id))
@@ -159,7 +177,7 @@ export function TokenTable() {
             />
             <Button 
               variant="outline" 
-              onClick={() => handleFetchDistributions(jwtToken)}
+              onClick={() => handleFetchDistributions(jwtToken, includeClaimed)}
               disabled={!jwtToken || isLoading}
             >
               {isLoading ? "Loading..." : distributions.length > 0 ? "Refresh Rewards" : "Fetch Rewards"}
@@ -174,24 +192,76 @@ export function TokenTable() {
           </div>
         )}
 
-        {/*<div className="flex gap-4 mb-6">*/}
-        {/*  <div className="flex items-center gap-2">*/}
-        {/*    <Input*/}
-        {/*      type="number"*/}
-        {/*      value={minValue}*/}
-        {/*      onChange={(e) => setMinValue(e.target.value)}*/}
-        {/*      className="w-32"*/}
-        {/*      placeholder="value > $1"*/}
-        {/*    />*/}
-        {/*  </div>*/}
-        {/*  <Button*/}
-        {/*    variant="outline"*/}
-        {/*    onClick={() => setShowUnclaimed(!showUnclaimed)}*/}
-        {/*    className={cn(showUnclaimed && "bg-primary text-primary-foreground")}*/}
-        {/*  >*/}
-        {/*    Show Unclaimed*/}
-        {/*  </Button>*/}
-        {/*</div>*/}
+        {distributions.length > 0 && (
+          <div className="flex flex-wrap gap-4 mb-6">
+            <div className="flex items-center gap-2">
+              <Switch
+                id="includeClaimed"
+                checked={includeClaimed}
+                onCheckedChange={(checked) => {
+                  setIncludeClaimed(checked);
+                  if (jwtToken) handleFetchDistributions(jwtToken, checked);
+                }}
+              />
+              <Label htmlFor="includeClaimed" className="text-sm cursor-pointer">
+                {includeClaimed ? "Showing all rewards" : "Only showing unclaimed"}
+              </Label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Switch
+                id="showOnlyWithBalance"
+                checked={showOnlyWithBalance}
+                onCheckedChange={setShowOnlyWithBalance}
+              />
+              <Label htmlFor="showOnlyWithBalance" className="text-sm cursor-pointer">
+                {showOnlyWithBalance ? "Only showing tokens with balance" : "Showing all tokens"}
+              </Label>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Label htmlFor="minSolValue" className="text-sm whitespace-nowrap">SOL Value:</Label>
+              <div className="flex gap-1">
+                <Input
+                  type="number"
+                  value={minSolValue}
+                  onChange={(e) => setMinSolValue(e.target.value)}
+                  className="w-32"
+                  placeholder="Min SOL Value"
+                />
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMinSolValue("0")}
+                  className={cn(minSolValue === "0" && "bg-primary text-primary-foreground")}
+                >
+                  All
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMinSolValue("0.01")}
+                  className={cn(minSolValue === "0.01" && "bg-primary text-primary-foreground")}
+                >
+                  &gt; 0.01
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setMinSolValue("0.1")}
+                  className={cn(minSolValue === "0.1" && "bg-primary text-primary-foreground")}
+                >
+                  &gt; 0.1
+                </Button>
+
+                {/*<div className="flex gap-4 mb-6">*/}
+                {/*  <div className="flex items-center gap-2">*/}
+                {/*  </div>*/}
+                {/*</div>*/}
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-card rounded-lg border">
           <div className="grid grid-cols-7 gap-4 p-4 border-b text-muted-foreground">
@@ -202,7 +272,7 @@ export function TokenTable() {
                 onClick={handleSelectAll}
                 className="h-4 px-2"
               >
-                {selectedTokens.length === filteredDistributions.length ? "Deselect All" : "Select All"}
+                {selectedTokens.length === filteredDistributions.length ? "Deselect All" : `Select All (${filteredDistributions.length})`}
               </Button>
             </div>
             <div>Token</div>
@@ -259,7 +329,7 @@ export function TokenTable() {
                     "px-2 py-1 rounded-full text-sm inline-flex w-fit items-center gap-1",
                     !dist.claimedAt && (!states[dist.id] || states[dist.id]?.status === 'unclaimed') && "bg-primary/20 text-primary",
                     states[dist.id]?.status === 'pending' && "bg-yellow-500/20 text-yellow-500",
-                    states[dist.id]?.status === 'claiming' || states[dist.id]?.status === 'selling' && "bg-blue-500/20 text-blue-500",
+                    (states[dist.id]?.status === 'claiming' || states[dist.id]?.status === 'selling') && "bg-blue-500/20 text-blue-500",
                     (dist.claimedAt || states[dist.id]?.status === 'claimed' || states[dist.id]?.status === 'sold') && "bg-green-500/20 text-green-500"
                   )}
                 >
@@ -307,21 +377,21 @@ export function TokenTable() {
               </Label>
             </div>
             <Button
-              disabled={selectedTokens.length === 0 || claimLoading}
+              disabled={!wallet || !connection || selectedTokens.length === 0 || claimLoading}
               variant="default"
               className="flex-1 bg-primary text-primary-foreground"
               onClick={claimSelected}
             >
-              {claimLoading ? "Claiming..." : `Claim Selected (${selectedTokens.length})`}
+              {!wallet || !connection ? "Wallet not connected!" : claimLoading ? "Claiming..." : `Claim Selected (${selectedTokens.length})`}
             </Button>
             <Button
               // disabled={true}
-              disabled={selectedTokens.length === 0 || sellLoading}
+              disabled={!wallet || !connection || selectedTokens.length === 0 || sellLoading}
               variant="outline"
               className="flex-1 border-primary text-primary hover:bg-primary hover:text-primary-foreground"
               onClick={sellSelected}
             >
-              {sellLoading ? "Selling..." : `Sell Selected (${selectedTokens.length})`}
+              {!wallet || !connection ? "Wallet not connected!" : sellLoading ? "Selling..." : `Sell Selected (${selectedTokens.length})`}
               {/*Sell Selected ({selectedTokens.length})*/}
             </Button>
           </div>
