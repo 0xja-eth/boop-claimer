@@ -30,7 +30,7 @@ export function useDistributionBalances(distributions: Distribution[]) {
 
     const tokenAccount = getAssociatedTokenAddressSync(mint, wallet.publicKey)
     return await getAccount(connection, tokenAccount)
-  }, [connection])
+  }, [wallet, connection])
 
   const refetch = async () => {
     distributions.map(async (d, i) => {

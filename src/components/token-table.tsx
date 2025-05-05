@@ -16,6 +16,7 @@ import { PublicKey } from "@solana/web3.js";
 import { useDistributionBalances } from "@/hooks/use-distribution-balances";
 import { useBatchSell } from "@/hooks/use-batch-sell";
 import { toast } from "sonner";
+import { HowToPlayButton } from "@/components/how-to-play-modal";
 
 export type ClaimStatus = 'unclaimed' | 'pending' | 'claiming' | 'claimed' | 'selling' | 'sold';
 
@@ -142,9 +143,12 @@ export function TokenTable() {
 
   return (
     <div className="flex flex-col min-h-screen">
-      <div className="flex-1 w-full max-w-4xl mx-auto p-6">
+      <div className="flex-1 w-full max-w-[1440px] mx-auto p-6">
         <div className="flex items-center justify-between mb-8">
-          <h1 className="text-2xl font-bold">BoopClaimer</h1>
+          <div className="flex items-center gap-4">
+            <h1 className="text-2xl font-bold">BoopClaimer</h1>
+            <HowToPlayButton />
+          </div>
           <div className="flex items-center gap-4">
             <Input
               value={jwtToken}
@@ -170,24 +174,24 @@ export function TokenTable() {
           </div>
         )}
 
-        <div className="flex gap-4 mb-6">
-          <div className="flex items-center gap-2">
-            <Input
-              type="number"
-              value={minValue}
-              onChange={(e) => setMinValue(e.target.value)}
-              className="w-32"
-              placeholder="value > $1"
-            />
-          </div>
-          <Button
-            variant="outline"
-            onClick={() => setShowUnclaimed(!showUnclaimed)}
-            className={cn(showUnclaimed && "bg-primary text-primary-foreground")}
-          >
-            Show Unclaimed
-          </Button>
-        </div>
+        {/*<div className="flex gap-4 mb-6">*/}
+        {/*  <div className="flex items-center gap-2">*/}
+        {/*    <Input*/}
+        {/*      type="number"*/}
+        {/*      value={minValue}*/}
+        {/*      onChange={(e) => setMinValue(e.target.value)}*/}
+        {/*      className="w-32"*/}
+        {/*      placeholder="value > $1"*/}
+        {/*    />*/}
+        {/*  </div>*/}
+        {/*  <Button*/}
+        {/*    variant="outline"*/}
+        {/*    onClick={() => setShowUnclaimed(!showUnclaimed)}*/}
+        {/*    className={cn(showUnclaimed && "bg-primary text-primary-foreground")}*/}
+        {/*  >*/}
+        {/*    Show Unclaimed*/}
+        {/*  </Button>*/}
+        {/*</div>*/}
 
         <div className="bg-card rounded-lg border">
           <div className="grid grid-cols-7 gap-4 p-4 border-b text-muted-foreground">
