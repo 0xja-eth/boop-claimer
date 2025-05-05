@@ -8,7 +8,11 @@ const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
   title: "Boop Claimer",
-  description: "A Next.js application with Tailwind CSS",
+  description: "hey frens! ✧˖° claim, manage & sell ur boop.fun rewards in one magical place! check ur token balances, see how much SOL they're worth, and claim or sell multiple tokens with just one click. it's super easy & totally safe! (´｡• ◡ •｡`) ♡",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 }
 
 export default function RootLayout({
