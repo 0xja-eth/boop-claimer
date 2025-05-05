@@ -4,7 +4,7 @@ import { getAssociatedTokenAddressSync, unpackAccount } from "@solana/spl-token"
 import { Distribution } from "@/lib/solana/op/get-distributions";
 import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
 
-export function useDistributionBalances(distributions: Distribution[]) {
+export function useDistributionBalances(distributions: Distribution[], autoRefreshInterval = 3000) {
   const [balances, setBalances] = useState<Record<string, bigint>>({});
 
   const wallet = useAnchorWallet();
@@ -50,9 +50,15 @@ export function useDistributionBalances(distributions: Distribution[]) {
     }
   }, [wallet, connection, distributions]);
 
+  useEffect(() => { refetch() }, [refetch]);
+
   useEffect(() => {
-    refetch();
-  }, [refetch]);
+    if (autoRefreshInterval <= 0) return;
+    
+    const intervalId = setInterval(refetch, autoRefreshInterval);
+    
+    return () => clearInterval(intervalId);
+  }, [refetch, autoRefreshInterval]);
 
   return { balances, refetch };
 }
