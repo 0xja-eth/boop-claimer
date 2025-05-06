@@ -25,7 +25,7 @@ export type SellIxParams = IxBuilderParams<typeof CPSwap> & {
   seller: PublicKey;
 }
 
-export async function sellIx({ program, mint, amountLamports, seller, useMemo }: SellIxParams) {
+export async function sellIx({ program, mint, amountLamports, seller }: SellIxParams) {
   const authority = authorityAccount().pda
   const token0 = mint.toBase58() < NATIVE_MINT.toBase58() ? mint : NATIVE_MINT
   const token1 = mint.toBase58() < NATIVE_MINT.toBase58() ? NATIVE_MINT : mint
@@ -63,15 +63,5 @@ export async function sellIx({ program, mint, amountLamports, seller, useMemo }:
 
   const ix3 = createCloseAccountInstruction(outputTokenAccount, seller, seller)
 
-  const ix4 = createMemoInstruction(`Sell ${mint.toString()} at ${Date.now()}`, [seller]);
-
-  // const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
-  //
-  // const ix4 = new TransactionInstruction({
-  //   keys: [],
-  //   programId: MEMO_PROGRAM_ID,
-  //   data: Buffer.from(`memo-${Date.now()}-${Math.random()}`)
-  // });
-
-  return useMemo ? [ix4, ix1, ix2, ix3] : [ix1, ix2, ix3]
+  return [ix1, ix2, ix3]
 }

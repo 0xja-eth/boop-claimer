@@ -21,7 +21,7 @@ export interface ClaimIxParams extends IxBuilderParams<typeof MerkleDistributor>
   claimant: PublicKey;
 }
 
-export async function claimIx({ program, mint, amountUnlocked, proofs, claimant, useMemo }: ClaimIxParams) {
+export async function claimIx({ program, mint, amountUnlocked, proofs, claimant }: ClaimIxParams) {
   const distributor = distributorAccount(mint).pda
   const claimStatus = claimStatusAccount(distributor, claimant).pda
 
@@ -42,15 +42,5 @@ export async function claimIx({ program, mint, amountUnlocked, proofs, claimant,
       .accountsStrict(accounts)
       .instruction();
 
-  const ix3 = createMemoInstruction(`Claim ${mint.toString()} at ${Date.now()}`, [claimant]);
-
-  // const MEMO_PROGRAM_ID = new PublicKey("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
-  //
-  // const ix3 = new TransactionInstruction({
-  //   keys: [],
-  //   programId: MEMO_PROGRAM_ID,
-  //   data: Buffer.from(`memo-${Date.now()}-${Math.random()}`)
-  // });
-
-  return useMemo ? [ix3, ix1, ix2] : [ix1, ix2]
+  return [ix1, ix2]
 }

@@ -11,7 +11,7 @@ import {
   // VersionedMessage,
   VersionedTransaction
 } from "@solana/web3.js";
-import { loadProgram, signAndSendTx, signAndSendTxs, signTx, signTxs } from "@/lib/solana/solana";
+import { loadProgram } from "@/lib/solana";
 import {
   // AnchorWallet,
   useAnchorWallet,
@@ -27,8 +27,12 @@ import { CPSwap } from "@/constants/contracts/idls/cp_swap";
 import { bundleTipIx, DefaultTipLamports, sendBundle, waitForBundle, waitForTransactions } from "@/lib/solana/jito";
 import { toast } from 'sonner';
 import { ClaimingState } from "@/components/token-table";
+import { signAndSendTx, signAndSendTxs, signTx, signTxs } from "@/lib/solana/tx";
+import { GenTxs, SendTxs } from "@/constants/api";
+import { splitArray } from "@/lib/array";
+import bs58 from "bs58";
 
-export const BundleTxCount = 4;
+const BatchTxCount = 4;
 
 export function useBatchClaim() {
   const [loading, setLoading] = useState(false);
@@ -70,102 +74,74 @@ export function useBatchClaim() {
       );
 
       try {
-        let recentBlockhash = await connection.getLatestBlockhash()
-        const claimant = wallet.publicKey
+        const batches = splitArray(distributions, sell ? BatchTxCount / 2 : BatchTxCount)
 
-        const distributionTxs: VersionedTransaction[][] = []
-        let bundleTxs: VersionedTransaction[] = []
+        for (const batch of batches) {
+          try {
+            // Update status to claiming
+            setClaimingStates(prev => {
+              const newStates = { ...prev }
+              batch.forEach(d => newStates[d.id] = { ...newStates[d.id], status: 'claiming' })
+              return newStates
+            });
 
-        for (const distribution of distributions) {
-          // Update status to claiming
-          setClaimingStates(prev => ({
-            ...prev,
-            [distribution.id]: { ...prev[distribution.id], status: 'claiming' }
-          }));
-
-          const mint = new PublicKey(distribution.token.address)
-          const amount = new BN(distribution.amountLpt)
-          const proofs = distribution.proofs
-
-          const proofsBN = proofs.map(p => p.map(b => new BN(b)))
-
-          const cTx = await buildTx(claimIx({
-            program: merkleDistributorProgram, mint, amountUnlocked: amount, proofs: proofsBN, claimant,
-            useMemo: bundleTxs.length >= BundleTxCount / 2
-          }), {
-            payer: claimant, recentBlockhash, microLamports: 1000, units: 150000
-          })
-
-          let newTxs = [cTx]
-          if (sell) {
-            const sTx = await buildTx(sellIx({
-              program: cpSwapProgram, mint, amountLamports: amount, seller: claimant,
-              useMemo: bundleTxs.length >= BundleTxCount / 2
-            }), {
-              payer: claimant, recentBlockhash, microLamports: 3000, units: 150000
+            const {txsGroup: serializedTxsGroup} = await GenTxs({
+              op: sell ? "claim-sell" : "claim", ids: JSON.stringify(batch.map(d => d.id))
             })
-            newTxs.push(sTx)
-          }
+            const serializedTxs = serializedTxsGroup.flat()
+            const txs = serializedTxs.map(sTx => VersionedTransaction.deserialize(bs58.decode(sTx)))
 
-          bundleTxs.push(...newTxs)
-          distributionTxs.push(newTxs)
+            const tipTx = await buildTx(
+              bundleTipIx(wallet.publicKey), { recentBlockhash: txs[0].message.recentBlockhash, payer: wallet.publicKey, units: 30000 }
+            )
 
-          if (bundleTxs.length >= BundleTxCount) {
-            await sendBundleTxs(recentBlockhash, distributions, distributionTxs, bundleTxs, sell);
+            const [signedTipTx, ...signedTxs] = await wallet.signAllTransactions([tipTx, ...txs])
 
-            // const tipTx = await buildTx(
-            //   bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
-            //   { recentBlockhash, payer: wallet.publicKey, units: 30000 }
-            // )
-            //
-            // await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false);
-            // // Update status to claimed for the processed distributions
-            // const processedDistIds = distributionTxs
-            //   .slice(-Math.floor(bundleTxs.length / (sell ? 2 : 1)))
-            //   .map(txs => distributions[distributionTxs.indexOf(txs)].id);
-            //
-            // setClaimingStates(prev => {
-            //   const newStates = { ...prev };
-            //   processedDistIds.forEach(id => {
-            //     if (newStates[id]) {
-            //       newStates[id] = { ...newStates[id], status: 'claimed' };
-            //       toast.success(`Successfully claimed ${newStates[id].distribution.token.symbol}`);
-            //     }
-            //   });
-            //   return newStates;
-            // });
+            const serializedSignedTxs = signedTxs.map(sTx => bs58.encode(sTx.serialize()))
+            const serializedSignedTxsGroup = splitArray(serializedSignedTxs, sell ? 2 : 1)
+            const serializedSignedTipTx = bs58.encode(signedTipTx.serialize())
 
-            recentBlockhash = await connection.getLatestBlockhash()
-            bundleTxs = []
+            const { transactions } = await SendTxs({
+              op: sell ? "claim-sell" : "claim", ids: batch.map(d => d.id),
+              txsGroup: serializedSignedTxsGroup, tipTx: serializedSignedTipTx
+            })
+
+            // Update status to claimed for the distributions in this batch
+            waitForTransactions(connection, transactions)
+              .then(() => {
+                setClaimingStates(prev => {
+                  const newStates = { ...prev };
+                  batch.forEach(distribution => {
+                    const id = distribution.id;
+                    if (newStates[id]) {
+                      newStates[id] = { ...newStates[id], status: 'claimed' };
+                      toast.success(`Successfully claimed ${newStates[id].distribution.token.symbol}`);
+                    }
+                  });
+                  return newStates;
+                });
+              })
+              .catch(e => {
+                console.error("Failed to wait for bundle:", e)
+                toast.error("Claim failed! Please try again later.");
+
+                setClaimingStates(prev => {
+                  const newStates = { ...prev };
+                  batch.forEach(distribution => {
+                    if (newStates[distribution.id]) delete newStates[distribution.id]
+                  });
+                  return newStates;
+                });
+              });
+
+            console.log("Claiming transactions:", transactions);
+          } catch (error) {
+            console.error("Failed to send bundle:", error);
+            toast.error('Failed to send transactions');
+
+            throw error
           }
         }
-        if (bundleTxs.length > 0) {
-          await sendBundleTxs(recentBlockhash, distributions, distributionTxs, bundleTxs, sell);
-
-          // const tipTx = await buildTx(
-          //   bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
-          //   { recentBlockhash, payer: wallet.publicKey, units: 30000 }
-          // )
-          //
-          // await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false);
-          // // Update status to claimed for the remaining distributions
-          // const remainingDistIds = distributionTxs
-          //   .slice(-Math.floor(bundleTxs.length / (sell ? 2 : 1)))
-          //   .map(txs => distributions[distributionTxs.indexOf(txs)].id);
-          //
-          // setClaimingStates(prev => {
-          //   const newStates = { ...prev };
-          //   remainingDistIds.forEach(id => {
-          //     if (newStates[id]) {
-          //       newStates[id] = { ...newStates[id], status: 'claimed' };
-          //       toast.success(`Successfully claimed ${newStates[id].distribution.token.symbol}`);
-          //     }
-          //   });
-          //   return newStates;
-          // });
-        }
-
-        console.log("Claiming transactions:", distributionTxs);
       } catch (error) {
         console.error("Failed to claim:", error);
         toast.error('Failed to process claims');
@@ -174,9 +150,6 @@ export function useBatchClaim() {
           const newStates = { ...prev };
           Object.keys(newStates).forEach(id => {
             if (newStates[id].status !== 'claimed') delete newStates[id]
-            // {
-            //   newStates[id] = { ...newStates[id], status: 'unclaimed' };
-            // }
           });
           return newStates;
         });
@@ -206,7 +179,7 @@ export function useBatchClaim() {
 
     try {
       const tipTx = await buildTx(
-        bundleTipIx(wallet.publicKey, DefaultTipLamports * 3),
+        bundleTipIx(wallet.publicKey),
         { recentBlockhash, payer: wallet.publicKey, units: 30000 }
       )
 

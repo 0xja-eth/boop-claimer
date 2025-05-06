@@ -19,6 +19,8 @@ import { useBatchSell } from "@/hooks/use-batch-sell";
 import { toast } from "sonner";
 import { HowToPlayButton } from "@/components/how-to-play-modal";
 import { useAnchorWallet, useConnection } from "@solana/wallet-adapter-react";
+import { GetDistributions } from "@/constants/api";
+import { getToken, getTokenValue, isValidToken, loadToken, setupToken } from "@/lib/auth";
 
 export type ClaimStatus = 'unclaimed' | 'pending' | 'claiming' | 'claimed' | 'selling' | 'sold';
 
@@ -38,7 +40,7 @@ export function TokenTable() {
   const [autoSellAfterClaim, setAutoSellAfterClaim] = useState(true)
   const [includeClaimed, setIncludeClaimed] = useState(false)
   const [showOnlyWithBalance, setShowOnlyWithBalance] = useState(false)
-  const [minSolValue, setMinSolValue] = useState<string>("0")
+  const [minUsdValue, setMinUsdValue] = useState<string>("0")
 
   const {claim, loading: claimLoading, claimingStates} = useBatchClaim()
   const {sell, loading: sellLoading, sellingStates} = useBatchSell()
@@ -59,8 +61,9 @@ export function TokenTable() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const jwtToken = localStorage.getItem('jwtToken') || ""
+      const jwtToken = loadToken()?.value || ""
       setJwtToken(jwtToken)
+
       if (jwtToken) handleFetchDistributions(jwtToken, includeClaimed)
     }
   }, [])
@@ -72,25 +75,29 @@ export function TokenTable() {
     setIsLoading(true)
     setError(null)
     try {
-      const response = await fetch(`/api/distributions?includeClaimed=${includeClaimed}`, {
-        headers: {
-          "Authorization": `Bearer ${jwtToken}`
-        }
-      })
-      
-      if (!response.ok) {
-        localStorage.removeItem('jwtToken')
+      if (!isValidToken(jwtToken))
         throw new Error("Invalid or expired JWT token. Please get a new token from boop.fun and try again.")
 
-        // throw new Error(`HTTP error! status: ${response.status}`)
-      }
-      
-      const data = await response.json()
-      if (data.error) {
-        throw new Error(data.error)
-      }
-      
-      localStorage.setItem('jwtToken', jwtToken)
+      setupToken(jwtToken)
+
+      const data = await GetDistributions({ includeClaimed })
+
+      // const response = await fetch(`/api/distributions?includeClaimed=${includeClaimed}`, {
+      //   headers: {
+      //     "Authorization": `Bearer ${jwtToken}`
+      //   }
+      // })
+      //
+      // if (!response.ok) {
+      //   localStorage.removeItem('jwtToken')
+      //   throw new Error("Invalid or expired JWT token. Please get a new token from boop.fun and try again.")
+      //
+      //   // throw new Error(`HTTP error! status: ${response.status}`)
+      // }
+      //
+      // const data = await response.json()
+
+      // localStorage.setItem('jwtToken', jwtToken)
       setDistributions(data)
     } catch (error) {
       console.error("Failed to fetch distributions:", error)
@@ -140,14 +147,12 @@ export function TokenTable() {
   }
 
   const filteredDistributions = distributions.filter(dist => {
-    // 检查是否满足最小 SOL 价值要求
-    const solValue = lamportsToSol(dist.amountSolLpt);
-    const meetsMinSolValue = solValue >= parseFloat(minSolValue || "0");
+    const usdValue = parseFloat(dist.amountUsd);
+    const meetsMinUsdValue = usdValue >= parseFloat(minUsdValue || "0");
     
-    // 检查是否满足只显示有余额的要求
     const hasBalance = !showOnlyWithBalance || (balances[dist.id] && balances[dist.id] > BigInt(0.1 * 1e9));
     
-    return meetsMinSolValue && hasBalance;
+    return meetsMinUsdValue && hasBalance;
   });
 
   const selectedTotal = {
@@ -227,44 +232,39 @@ export function TokenTable() {
             </div>
 
             <div className="flex items-center gap-2">
-              <Label htmlFor="minSolValue" className="text-sm whitespace-nowrap">SOL Value:</Label>
+              <Label htmlFor="minUsdValue" className="text-sm whitespace-nowrap">USD Value:</Label>
               <div className="flex gap-1">
                 <Input
                   type="number"
-                  value={minSolValue}
-                  onChange={(e) => setMinSolValue(e.target.value)}
+                  value={minUsdValue}
+                  onChange={(e) => setMinUsdValue(e.target.value)}
                   className="w-32"
-                  placeholder="Min SOL Value"
+                  placeholder="Min USD Value"
                 />
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setMinSolValue("0")}
-                  className={cn(minSolValue === "0" && "bg-primary text-primary-foreground")}
+                  onClick={() => setMinUsdValue("0")}
+                  className={cn(minUsdValue === "0" && "bg-primary text-primary-foreground")}
                 >
                   All
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setMinSolValue("0.01")}
-                  className={cn(minSolValue === "0.01" && "bg-primary text-primary-foreground")}
+                  onClick={() => setMinUsdValue("0.5")}
+                  className={cn(minUsdValue === "0.5" && "bg-primary text-primary-foreground")}
                 >
-                  &gt; 0.01
+                  &gt; $0.5
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => setMinSolValue("0.1")}
-                  className={cn(minSolValue === "0.1" && "bg-primary text-primary-foreground")}
+                  onClick={() => setMinUsdValue("1")}
+                  className={cn(minUsdValue === "1" && "bg-primary text-primary-foreground")}
                 >
-                  &gt; 0.1
+                  &gt; $1
                 </Button>
-
-                {/*<div className="flex gap-4 mb-6">*/}
-                {/*  <div className="flex items-center gap-2">*/}
-                {/*  </div>*/}
-                {/*</div>*/}
               </div>
             </div>
           </div>

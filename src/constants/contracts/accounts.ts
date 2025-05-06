@@ -1,5 +1,5 @@
 
-import { getPublicKey, loadProgram } from "@/lib/solana/solana";
+import { getPublicKey, loadProgram } from "@/lib/solana";
 import { PublicKey } from "@solana/web3.js";
 import BN from "bn.js";
 

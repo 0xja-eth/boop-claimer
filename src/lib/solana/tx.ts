@@ -1,15 +1,17 @@
 // import { getSimulationComputeUnits } from "@solana-developers/helpers";
 import {
   AddressLookupTableAccount,
+  BlockhashWithExpiryBlockHeight,
   ComputeBudgetProgram,
   Connection,
   Keypair,
   PublicKey,
+  Transaction,
   TransactionInstruction,
   TransactionMessage,
   VersionedTransaction,
-  BlockhashWithExpiryBlockHeight,
 } from "@solana/web3.js";
+import { AnchorWallet } from "@solana/wallet-adapter-react";
 
 const confirmOptions = {
   skipPreflight: true,
@@ -19,26 +21,28 @@ export type TransactionOptions = {
   instructions: Array<TransactionInstruction>;
   payer: PublicKey;
   connection?: Connection;
-  recentBlockhash?: BlockhashWithExpiryBlockHeight;
+  recentBlockhash?: string | BlockhashWithExpiryBlockHeight;
   lookupTables?: Array<AddressLookupTableAccount>;
   microLamports?: number;
   units?: number;
-}
+};
 export async function buildTransaction({
-                                         instructions,
-                                         payer,
-                                         connection,
-                                         recentBlockhash,
-                                         lookupTables = [],
-                                         microLamports = 5000, // 设置默认优先费用
-                                         units = 100000, // 设置是否忽略模拟计算错误
-                                       }: TransactionOptions) {
-  recentBlockhash ||= await connection?.getLatestBlockhash()
-  if (!recentBlockhash) throw new Error("RecentBlockhash is not provided!")
+  instructions,
+  payer,
+  connection,
+  recentBlockhash,
+  lookupTables = [],
+  microLamports = 5000, // 设置默认优先费用
+  units = 100000, // 设置是否忽略模拟计算错误
+}: TransactionOptions) {
+  recentBlockhash ||= await connection?.getLatestBlockhash();
+  if (!recentBlockhash) throw new Error("RecentBlockhash is not provided!");
+
+  if (typeof recentBlockhash !== "string") recentBlockhash = recentBlockhash.blockhash
 
   // 插入设置计算单位价格的指令，应用优先费用
   instructions.unshift(
-      ComputeBudgetProgram.setComputeUnitPrice({ microLamports })
+    ComputeBudgetProgram.setComputeUnitPrice({ microLamports }),
   );
 
   // 设置计算单位限制
@@ -49,16 +53,15 @@ export async function buildTransaction({
   // 构建交易
   return {
     transaction: new VersionedTransaction(
-        new TransactionMessage({
-          instructions,
-          recentBlockhash: recentBlockhash.blockhash,
-          payerKey: payer,
-        }).compileToV0Message(lookupTables)
+      new TransactionMessage({
+        instructions,
+        recentBlockhash,
+        payerKey: payer,
+      }).compileToV0Message(lookupTables),
     ),
     recentBlockhash,
   };
 }
-
 
 // export type OptimalTransactionOptions = {
 //   instructions: Array<TransactionInstruction>;
@@ -253,10 +256,117 @@ export async function buildTransaction({
 export async function waitForSignatureConfirmation(
   connection: Connection,
   signature: string,
-  blockHash?: BlockhashWithExpiryBlockHeight
+  blockHash?: BlockhashWithExpiryBlockHeight,
 ) {
-  blockHash ||= await connection.getLatestBlockhash()
-  return await connection.confirmTransaction({
-    signature, ...blockHash
-  }, "confirmed");
+  blockHash ||= await connection.getLatestBlockhash();
+  return await connection.confirmTransaction(
+    {
+      signature,
+      ...blockHash,
+    },
+    "confirmed",
+  );
+}
+
+export async function signTx(
+  connection: Connection,
+  tx: Transaction | VersionedTransaction,
+  wallet: AnchorWallet,
+  otherSigners: Keypair[] = [],
+) {
+  if (tx instanceof Transaction) {
+    tx.recentBlockhash = (
+      await connection.getLatestBlockhash("singleGossip")
+    ).blockhash;
+    tx.feePayer = wallet.publicKey;
+
+    if (otherSigners.length > 0) tx.sign(...otherSigners);
+  } else {
+    if (otherSigners.length > 0) tx.sign(otherSigners);
+  }
+
+  console.log("Signing Transaction:", tx);
+  return await wallet.signTransaction(tx);
+}
+
+export async function signAndSendTx(
+  connection: Connection,
+  tx: Transaction | VersionedTransaction,
+  wallet: AnchorWallet,
+  otherSigners: Keypair[] = [],
+) {
+  const signedTx = await signTx(connection, tx, wallet, otherSigners);
+
+  const rawTransaction = signedTx.serialize();
+
+  console.log("Sending Transaction:", signedTx);
+  const txSig = await connection.sendRawTransaction(rawTransaction);
+
+  console.log("Transaction Signature:", txSig);
+  const latestBlockHash = await connection.getLatestBlockhash();
+
+  const res = await connection.confirmTransaction({
+    blockhash: latestBlockHash.blockhash,
+    lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+    signature: txSig,
+  });
+  console.log("Confirmed Transaction:", res);
+
+  return txSig;
+}
+
+export async function signTxs(
+  connection: Connection,
+  txs: (Transaction | VersionedTransaction)[],
+  wallet: AnchorWallet,
+  otherSigners: Keypair[] = [],
+) {
+  for (const tx of txs) {
+    if (tx instanceof Transaction) {
+      tx.recentBlockhash = (
+        await connection.getLatestBlockhash("singleGossip")
+      ).blockhash;
+      tx.feePayer = wallet.publicKey;
+
+      if (otherSigners.length > 0) tx.sign(...otherSigners);
+    } else {
+      if (otherSigners.length > 0) tx.sign(otherSigners);
+    }
+  }
+
+  console.log("Signing Transactions:", txs);
+  return await wallet.signAllTransactions(txs);
+}
+
+export async function signAndSendTxs(
+  connection: Connection,
+  txs: (Transaction | VersionedTransaction)[],
+  wallet: AnchorWallet,
+  otherSigners: Keypair[] = [],
+) {
+  const signedTxs = await signTxs(connection, txs, wallet, otherSigners);
+
+  const rawTransactions = signedTxs.map((tx) => tx.serialize());
+
+  console.log("Sending Transaction:", signedTxs);
+  const txSigs = await Promise.allSettled(
+    rawTransactions.map((rtx) => connection.sendRawTransaction(rtx)),
+  );
+
+  console.log("Transaction Signature:", txSigs);
+  const latestBlockHash = await connection.getLatestBlockhash();
+
+  const res = await Promise.allSettled(
+    txSigs.map((txSig) =>
+      connection.confirmTransaction({
+        blockhash: latestBlockHash.blockhash,
+        lastValidBlockHeight: latestBlockHash.lastValidBlockHeight,
+        // @ts-ignore
+        signature: txSig!.value!,
+      }),
+    ),
+  );
+  console.log("Confirmed Transaction:", res);
+
+  return txSigs;
 }

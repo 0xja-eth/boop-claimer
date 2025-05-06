@@ -41,7 +41,7 @@ interface DistributionResponse {
 }
 
 // Get wallet address from JWT token
-function getWalletAddressFromToken(token: string): string {
+export function getWalletAddressFromToken(token: string): string {
   try {
     // Note: we only decode, not verify, since we don't have the secret
     const decoded = jwt.decode(token) as JWTPayload;

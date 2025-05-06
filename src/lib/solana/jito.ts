@@ -8,8 +8,6 @@ import { AnchorWallet } from "@solana/wallet-adapter-react";
 import { buildTx } from "@/lib/solana/op/utils";
 import { WalletAdapterNetwork } from "@solana/wallet-adapter-base";
 
-const FeeAccount = new PublicKey("6V2Q7Rf7AdSQunBznv98uN3qhBRD2jrfjunKffNsrFaC")
-
 const Host: string = process.env.JITO_HOST_URL ?? (process.env.NEXT_PUBLIC_NETWORK == WalletAdapterNetwork.Mainnet ? "https://mainnet.block-engine.jito.wtf" : "")
 
 const BundleRPC = <P = any[], R = any>(method: string) => (d: P = [] as P, h?: any) => post<{
@@ -52,7 +50,7 @@ export type GetBundleStatusesResponse = {
 }
 export const GetBundleStatuses = BundleRPC<string[][], GetBundleStatusesResponse>("getBundleStatuses")
 
-export const DefaultTipLamports = Number(process.env.DEFAULT_TIP_LAMPORTS || 750000)
+export const DefaultTipLamports = Number(process.env.DEFAULT_TIP_LAMPORTS || 0.0005 * 1e9)
 
 export class BundleNotLandedError extends Error {
   constructor(public bundleId: string) {
@@ -70,18 +68,18 @@ export async function bundleTipIx(
   const tipAccountPublicKey = new PublicKey(tipAccounts[tipAccountIdx])
   console.log("[Send Bundle] Tip accounts", tipAccounts, tipAccountIdx)
 
-  const ix1 = web3.SystemProgram.transfer({
+  return web3.SystemProgram.transfer({
     fromPubkey: sender,
     toPubkey: tipAccountPublicKey,
     lamports: tipLamports,
   })
-  const ix2 = web3.SystemProgram.transfer({
-    fromPubkey: sender,
-    toPubkey: FeeAccount,
-    lamports: tipLamports * 5,
-  })
+  // const ix2 = web3.SystemProgram.transfer({
+  //   fromPubkey: sender,
+  //   toPubkey: FeeAccount,
+  //   lamports: tipLamports * 5,
+  // })
 
-  return [ix1, ix2]
+  // return [ix1, ix2]
 }
 
 export async function sendBundle(
@@ -167,38 +165,24 @@ export async function sendBundle(
 
   return waitForBundle(bundleId)
 
-  // const waitRes = await waitFor(async () => {
-  //   const statuses = await GetInflightBundleStatuses([[bundleId]]);
-  //   const status = statuses.value[0]?.status
-  //
-  //   console.log("[Send Bundle] Checking bundle", status)
-  //   switch (status) {
-  //     case "Failed": return { isLanded: false }
-  //     case "Landed": return { isLanded: true }
-  //   }
-  // }, 2000, 15) // wait for 30 seconds
-  // const isLanded = waitRes?.isLanded
-  //
-  // if (!isLanded) {
-  //   console.log("[Send Bundle] Bundle failed to land")
-  //   throw new BundleNotLandedError(bundleId)
-  // }
-  //
-  // const statuses = await waitFor(async () => {
-  //   const res = await GetBundleStatuses([[bundleId]]);
-  //   const status = res.value[0]?.confirmation_status
-  //   const err = res.value[0]?.err
-  //
-  //   console.log("[Send Bundle] Checking bundle", status, err)
-  //   return status === "confirmed" ? res : null
-  // }, 2000, 5) // wait for 10 seconds
-  //
-  // if (!statuses) {
-  //   console.log("[Send Bundle] Bundle failed to confirm")
-  //   throw new Error("Bundle not confirmed")
-  // }
-  //
-  // console.log("[Send Bundle] Bundle confirmed", statuses)
+}
+
+export async function sendBundleDirectly(txs: string[], isWaitForBundle = true) {
+  if (txs.length === 0) return {
+    bundle_id: null, transactions: [] as string[]
+  }
+
+  const bundleId = await SendBundle([txs])
+  const txHashes = txs.map(stx => bs58.encode(
+    VersionedTransaction.deserialize(bs58.decode(stx)).signatures[0]
+  ))
+
+  console.log("[Send Bundle] Bundle ID", bundleId, txHashes)
+
+  if (!isWaitForBundle)
+    return { bundle_id: bundleId, transactions: txHashes }
+
+  return waitForBundle(bundleId)
 }
 
 export async function waitForBundle(bundleId: string, waitingLevel: "Pending" | "Landed" = "Landed") {
