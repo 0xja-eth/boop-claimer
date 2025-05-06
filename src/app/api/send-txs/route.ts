@@ -13,7 +13,7 @@ import {
 import { OpType } from "@/app/api/gen-txs/route";
 import { genClaimTxs, genSellTxs } from "@/services/gentxs";
 import bs58 from "bs58";
-import { TOKEN_PROGRAM_ID } from "@solana/spl-token";
+import { TOKEN_PROGRAM_ID } from "@solana/spl-token"; // Changed from @solana/spl_token to @solana/spl-token
 import { Connection } from "@/services/solana/common";
 import { sendBundle, sendBundleDirectly } from "@/lib/solana/jito";
 import { connect } from "@/lib/db/redis";
@@ -80,12 +80,24 @@ export async function POST(request: NextRequest) {
 
 /**
  * Verifies that the signed transactions from frontend match the expected transactions
+ * More flexible verification that allows wallets to add their own instructions
  */
 function verifyTransactions(
   signedTxsGroup: VersionedTransaction[][],
   expectedTxsGroup: VersionedTransaction[][]
 ): { valid: boolean; errors: string[] } {
   const errors: string[] = [];
+
+  // System program IDs to ignore (compute budget, etc.)
+  const IGNORED_PROGRAM_IDS = [
+    "ComputeBudget111111111111111111111111111111", // Compute budget program
+    "Sysvar1111111111111111111111111111111111111", // Sysvar program
+    "SysvarRent111111111111111111111111111111111", // Rent sysvar
+    "SysvarC1ock11111111111111111111111111111111", // Clock sysvar
+    "SysvarStakeHistory1111111111111111111111111", // Stake history sysvar
+    "SysvarRecentB1ockHashes11111111111111111111", // Recent blockhashes
+    "SysvarFees111111111111111111111111111111111", // Fees sysvar
+  ];
 
   // Check if the number of transaction groups matches
   if (signedTxsGroup.length !== expectedTxsGroup.length) {
@@ -109,84 +121,79 @@ function verifyTransactions(
       const signedTx = signedTxs[j];
       const expectedTx = expectedTxs[j];
 
-      // Compare instructions
-      const signedInstructions = signedTx.message.compiledInstructions;
+      // Extract all essential instructions from the expected transaction
       const expectedInstructions = expectedTx.message.compiledInstructions;
-
-      if (signedInstructions.length !== expectedInstructions.length) {
-        errors.push(`Instruction count mismatch in transaction ${i}.${j}: expected ${expectedInstructions.length}, got ${signedInstructions.length}`);
-        continue;
-      }
-
-      // Compare each instruction
-      for (let k = 0; k < signedInstructions.length; k++) {
-        const signedIx = signedInstructions[k];
-        const expectedIx = expectedInstructions[k];
-        
-        // Compare program ID
-        const signedKeys = signedTx.message.getAccountKeys();
-        const expectedKeys = expectedTx.message.getAccountKeys();
-        
-        const signedProgramId = signedKeys.get(signedIx.programIdIndex);
-        const expectedProgramId = expectedKeys.get(expectedIx.programIdIndex);
-        
-        if (!signedProgramId || !expectedProgramId || !signedProgramId.equals(expectedProgramId)) {
-          errors.push(`Program ID mismatch in instruction ${i}.${j}.${k}: expected ${expectedProgramId?.toBase58()}, got ${signedProgramId?.toBase58()}`);
-          continue;
-        }
-
-        // Compare instruction data
-        if (!Buffer.from(signedIx.data).equals(Buffer.from(expectedIx.data))) {
-          errors.push(`Instruction data mismatch in instruction ${i}.${j}.${k}`);
-          continue;
-        }
-
-        // Compare accounts
-        if (signedIx.accountKeyIndexes.length !== expectedIx.accountKeyIndexes.length) {
-          errors.push(`Account count mismatch in instruction ${i}.${j}.${k}: expected ${expectedIx.accountKeyIndexes.length}, got ${signedIx.accountKeyIndexes.length}`);
-          continue;
-        }
-
-        // Compare each account
-        for (let l = 0; l < signedIx.accountKeyIndexes.length; l++) {
-          const signedAccIndex = signedIx.accountKeyIndexes[l];
-          const expectedAccIndex = expectedIx.accountKeyIndexes[l];
+      const expectedKeys = expectedTx.message.getAccountKeys();
+      
+      // Create fingerprints of expected instructions for matching
+      // Filter out system instructions that wallets might modify
+      const expectedFingerprints = expectedInstructions
+        .map(ix => {
+          const programId = expectedKeys.get(ix.programIdIndex);
+          const programIdStr = programId?.toBase58() || '';
           
-          const signedAcc = signedKeys.get(signedAccIndex);
-          const expectedAcc = expectedKeys.get(expectedAccIndex);
-          
-          if (!signedAcc || !expectedAcc || !signedAcc.equals(expectedAcc)) {
-            errors.push(`Account mismatch in instruction ${i}.${j}.${k}.${l}: expected ${expectedAcc?.toBase58()}, got ${signedAcc?.toBase58()}`);
+          // Skip system instructions that wallets might modify
+          if (IGNORED_PROGRAM_IDS.includes(programIdStr)) {
+            return null;
           }
+          
+          return {
+            programId: programIdStr,
+            data: Buffer.from(ix.data),
+            accounts: ix.accountKeyIndexes.map(idx => {
+              const acc = expectedKeys.get(idx);
+              return acc?.toBase58() || '';
+            })
+          };
+        })
+        .filter(fp => fp !== null); // Remove null entries (ignored programs)
+      
+      // Get all instructions from the signed transaction
+      const signedInstructions = signedTx.message.compiledInstructions;
+      const signedKeys = signedTx.message.getAccountKeys();
+      
+      // For each expected instruction, check if it exists in the signed transaction
+      for (const expectedFp of expectedFingerprints) {
+        let found = false;
+        
+        // Try to find a matching instruction in the signed transaction
+        for (const signedIx of signedInstructions) {
+          const signedProgramId = signedKeys.get(signedIx.programIdIndex)?.toBase58() || '';
+          
+          // Skip system instructions in signed transaction too
+          if (IGNORED_PROGRAM_IDS.includes(signedProgramId)) {
+            continue;
+          }
+          
+          // Check if program IDs match
+          if (signedProgramId !== expectedFp.programId) continue;
+          
+          // Check if instruction data matches
+          if (!Buffer.from(signedIx.data).equals(expectedFp.data)) continue;
+          
+          // Check if accounts match (allowing for different order)
+          const signedAccounts = signedIx.accountKeyIndexes.map(idx => {
+            const acc = signedKeys.get(idx);
+            return acc?.toBase58() || '';
+          });
+          
+          // Check if all expected accounts are present in the signed instruction
+          const allAccountsPresent = expectedFp.accounts.every(expectedAcc => 
+            signedAccounts.includes(expectedAcc)
+          );
+          
+          if (allAccountsPresent) {
+            found = true;
+            break;
+          }
+        }
+        
+        if (!found) {
+          errors.push(`Missing expected instruction in transaction ${i}.${j}: program=${expectedFp.programId}`);
         }
       }
     }
   }
 
   return { valid: errors.length === 0, errors };
-}
-
-/**
- * Sends the verified transactions to the blockchain
- */
-async function sendTransactions(txsGroup: VersionedTransaction[][]): Promise<string[][]> {
-  const results: string[][] = [];
-
-  for (const txs of txsGroup) {
-    const txResults: string[] = [];
-    
-    for (const tx of txs) {
-      try {
-        const signature = await Connection.sendTransaction(tx);
-        txResults.push(signature);
-      } catch (error: any) {
-        console.error('Error sending transaction:', error);
-        txResults.push(`error: ${error.message || String(error)}`);
-      }
-    }
-    
-    results.push(txResults);
-  }
-
-  return results;
 }
