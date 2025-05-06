@@ -202,49 +202,5 @@ export function useBatchSell() {
     ],
   );
 
-  const sendBundleTxs = useCallback(
-    async (recentBlockhash: BlockhashWithExpiryBlockHeight,
-           distributions: Distribution[],
-           distributionTxs: VersionedTransaction[][],
-           bundleTxs: VersionedTransaction[]) => {
-
-    if (!wallet || !connection)
-      throw new Error("Wallet not connected");
-
-    try {
-      const tipTx = await buildTx(
-        bundleTipIx(wallet.publicKey),
-        { recentBlockhash, payer: wallet.publicKey, units: 30000 }
-      )
-
-      const {transactions} = await sendBundle(connection, wallet, [tipTx, ...bundleTxs], [], false);
-
-      // Update status to claimed for the remaining distributions
-      const remainingDistIds = distributionTxs
-        .slice(-Math.floor(bundleTxs.length))
-        .map(txs => distributions[distributionTxs.indexOf(txs)].id);
-
-      waitForTransactions(connection, transactions)
-        .then(() => {
-          setSellingStates(prev => {
-            const newStates = { ...prev };
-            remainingDistIds.forEach(id => {
-              if (newStates[id]) {
-                newStates[id] = { ...newStates[id], status: 'sold' };
-                toast.success(`Successfully sold ${newStates[id].distribution.token.symbol}`);
-              }
-            });
-            return newStates;
-          });
-        })
-        .catch(e => console.error("Failed to wait for bundle:", e));
-      } catch (error) {
-        console.error("Failed to send bundle:", error);
-        toast.error('Failed to send transactions');
-
-        throw error
-      }
-    }, [connection, wallet])
-
-    return { sell, sellingStates, loading };
+  return { sell, sellingStates, loading };
 }
